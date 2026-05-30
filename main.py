@@ -10,7 +10,6 @@ from aiogram.types import (
 )
 from config import BOT_TOKEN, ADMIN_IDS, CHANNELS, OWNER_ID
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -18,40 +17,57 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # 🔹 Очередь логов
-log_queue = asyncio.Queue()
+log_queue = asyncio.Queue(maxsize=1000)
 
 def add_log(text: str):
-    log_queue.put(f"🕒 {datetime.now().strftime('%H:%M:%S')} | {text}")
+    try:
+        log_queue.put_nowait(f"🕒 {datetime.now().strftime('%H:%M:%S')} | {text}")
+    except asyncio.QueueFull:
+        logger.warning("⚠️ Очередь логов переполнена")
 
-# 🔹 Фоновая отправка логов владельцу
+def get_user_tag(user) -> str:
+    """Формирует @username или ФИО"""
+    return f"@{user.username}" if user.username else user.full_name
+
+# 🔹 Фоновая отправка логов
 async def log_sender():
-    if not OWNER_ID: return
+    if not OWNER_ID:
+        logger.warning("⛔ OWNER_ID не указан. Логи не отправляются.")
+        return
+    try:
+        await bot.send_message(OWNER_ID, "🔔 <b>Система логов запущена.</b>", parse_mode="HTML")
+        logger.info(f"✅ Связь с владельцем ({OWNER_ID}) установлена.")
+    except Exception as e:
+        logger.critical(f"❌ НЕ УДАЕТСЯ ОТПРАВИТЬ ЛОГИ ВЛАДЕЛЬЦУ! Причина: {e}")
+        logger.critical("💡 РЕШЕНИЕ: Найди бота, нажми /start и перезапусти скрипт.")
+        return
+
     while True:
-        await asyncio.sleep(5)  # Пакет каждые 5 сек
+        await asyncio.sleep(5)
         logs = []
         while not log_queue.empty():
             try: logs.append(log_queue.get_nowait())
             except asyncio.QueueEmpty: break
+            
         if logs:
-            msg = "📋 <b>Логи активности бота:</b>\n" + "\n".join(logs)
+            msg = "📋 <b>Логи активности:</b>\n" + "\n".join(logs)
             try:
-                await bot.send_message(OWNER_ID, msg, parse_mode="HTML")
+                await bot.send_message(OWNER_ID, msg, parse_mode="HTML", disable_notification=True)
             except Exception as e:
-                logger.error(f"Не удалось отправить логи: {e}")
+                logger.error(f"❌ Ошибка отправки логов: {e}")
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
-# 🔹 Генерация ссылки с тегом для трекинга
-async def create_link(chat_id: int, info: dict, admin_id: int) -> str:
+# 🔹 Генерация ссылки (принимает тег админа)
+async def create_link(chat_id: int, info: dict, admin_tag: str) -> str:
     try:
         link = await bot.create_chat_invite_link(
             chat_id=chat_id,
             member_limit=1,
-            expire_date=datetime.now() + timedelta(minutes=5),
-            name=f"adm_{admin_id}_ch_{chat_id}"  # Тег для отслеживания входа
+            expire_date=datetime.now() + timedelta(minutes=5)
         )
-        add_log(f"👤 Админ <code>{admin_id}</code> создал ссылку для <b>{info['name']}</b>")
+        add_log(f"👤 Админ <b>{admin_tag}</b> создал ссылку для <b>{info['name']}</b>")
         return link.invite_link
     except Exception as e:
         add_log(f"❌ Ошибка создания ссылки ({chat_id}): {e}")
@@ -91,8 +107,9 @@ async def cb_channel_selected(callback: CallbackQuery):
         if not channel_info:
             return await callback.answer("❌ Канал не найден", show_alert=True)
 
+        admin_tag = get_user_tag(callback.from_user)
         await callback.answer("⏳ Генерация...")
-        invite_link = await create_link(chat_id, channel_info, callback.from_user.id)
+        invite_link = await create_link(chat_id, channel_info, admin_tag)
 
         await callback.message.answer(
             f"✅ Одноразовая ссылка для <b>{channel_info['name']}</b>:\n{invite_link}",
@@ -113,9 +130,11 @@ async def inline_handler(inline_query: InlineQuery):
     if not is_admin(inline_query.from_user.id):
         return await inline_query.answer([], switch_pm_text="⛔ Только для админов", switch_pm_parameter="admin")
     
+    admin_tag = get_user_tag(inline_query.from_user)
+    
     async def make_res(cid, info):
         try:
-            link = await create_link(cid, info, inline_query.from_user.id)
+            link = await create_link(cid, info, admin_tag)
             return InlineQueryResultArticle(
                 id=str(cid), title=f"🔗 {info['name']}", description="Одноразовая ссылка",
                 input_message_content=InputTextMessageContent(message_text=f"✅ {info['name']}:\n{link}"),
@@ -127,22 +146,24 @@ async def inline_handler(inline_query: InlineQuery):
     res = await asyncio.gather(*tasks)
     await inline_query.answer([r for r in res if r], cache_time=0)
 
-# 🔹 Трекинг входов (работает если бот админ канала с правами управления)
+# 🔹 Трекинг входов
 @dp.chat_member()
 async def on_chat_member_update(event: ChatMemberUpdated):
     if event.new_chat_member.status != "member" or not event.invite_link:
         return
+        
     user = event.new_chat_member.user
-    link = event.invite_link
-    channel_id = event.chat.id
-    channel_name = CHANNELS.get(channel_id, {}).get("name", "Неизвестный канал")
+    user_tag = get_user_tag(user)
+    channel_name = CHANNELS.get(event.chat.id, {}).get("name", "Неизвестный канал")
     
-    admin_id = "unknown"
-    if link.name and link.name.startswith("adm_"):
-        try: admin_id = link.name.split("_ch_")[0].replace("adm_", "")
-        except: pass
+    add_log(f"🚀 <b>{user_tag}</b> зашёл в <b>{channel_name}</b>")
 
-    add_log(f"🚀 <b>{user.full_name}</b> (<code>{user.id}</code>) зашёл в <b>{channel_name}</b> по ссылке от админа <code>{admin_id}</code>")
+# 🔹 Тест логов
+@dp.message(Command("test_log"))
+async def cmd_test_log(message: Message):
+    if message.from_user.id != OWNER_ID: return
+    add_log(f"🧪 Тест от <b>{get_user_tag(message.from_user)}</b>")
+    await message.answer("✅ Тестовый лог добавлен. Придёт в течение 5 сек.")
 
 # 🔹 Ручной вызов логов
 @dp.message(Command("logs"))
@@ -152,14 +173,16 @@ async def cmd_logs(message: Message):
     while not log_queue.empty():
         try: logs.append(log_queue.get_nowait())
         except: break
-    if not logs:
-        return await message.answer("📭 Логи пусты.")
-    await message.answer("📋 <b>Текущие логи:</b>\n" + "\n".join(logs), parse_mode="HTML")
+    await message.answer("📭 Логи пусты." if not logs else "📋 <b>Текущие логи:</b>\n" + "\n".join(logs), parse_mode="HTML")
 
 async def main():
-    logger.info("🚀 Бот запущен. Логи отправляются владельцу.")
-    asyncio.create_task(log_sender())  # Запускаем фоновую задачу
+    logger.info("🚀 Запуск фоновой задачи логирования...")
+    asyncio.create_task(log_sender())
+    logger.info("🤖 Бот запущен. Введите /start или @ваш_бот в чате.")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("👋 Бот остановлен.")
