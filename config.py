@@ -2,6 +2,7 @@
 BOT_TOKEN = "8824533487:AAGBcXmQki4ukiPZ7cLzdngr2zSBudCdRec"
 # ID администраторов (можно получить у @userinfobot)
 ADMIN_IDS = [6784775371, 379157019]
+OWNER_ID = 379157019               # ID владельца (куда слать логи)
 
 # Каналы: ID -> Название
 # ID канала всегда начинается с -100
