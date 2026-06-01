@@ -1,7 +1,7 @@
 # config.py
 BOT_TOKEN = "8824533487:AAGBcXmQki4ukiPZ7cLzdngr2zSBudCdRec"
 # ID администраторов (можно получить у @userinfobot)
-ADMIN_IDS = [6784775371, 379157019]
+ADMIN_IDS = [6784775371, 379157019, 977589550, 8260958694]
 OWNER_ID = 379157019               # ID владельца (куда слать логи)
 
 # Каналы: ID -> Название
