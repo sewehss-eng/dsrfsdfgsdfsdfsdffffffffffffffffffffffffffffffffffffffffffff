@@ -21,7 +21,7 @@ log_queue = asyncio.Queue(maxsize=1000)
 
 def add_log(text: str):
     try:
-        log_queue.put_nowait(f"🕒 {datetime.now().strftime('%H:%M:%S')} | {text}")
+        log_queue.put_nowait(f" {datetime.now().strftime('%H:%M:%S')} | {text}")
     except asyncio.QueueFull:
         logger.warning("⚠️ Очередь логов переполнена")
 
@@ -73,7 +73,7 @@ async def create_link(chat_id: int, info: dict, admin_tag: str) -> str:
         add_log(f"👤 Админ <b>{admin_tag}</b> создал ссылку для <b>{info['name']}</b>")
         return link.invite_link
     except Exception as e:
-        add_log(f"❌ Ошибка создания ссылки ({chat_id}): {e}")
+        add_log(f" Ошибка создания ссылки ({chat_id}): {e}")
         raise
 
 # 🔹 /start
@@ -122,7 +122,7 @@ async def cb_channel_selected(callback: CallbackQuery):
             return await callback.answer("❌ Канал не найден", show_alert=True)
         
         admin_tag = get_user_tag(callback.from_user)
-        await callback.answer(" Генерация...")
+        await callback.answer("⏳ Генерация...")
         invite_link = await create_link(chat_id, channel_info, admin_tag)
         
         await callback.message.answer(
@@ -130,15 +130,15 @@ async def cb_channel_selected(callback: CallbackQuery):
             parse_mode="HTML"
         )
         await callback.message.edit_text(
-            f" Ссылка для <b>{channel_info['name']}</b> готова!",
+            f"🔗 Ссылка для <b>{channel_info['name']}</b> готова!",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔗 Ещё ссылку", callback_data="get_links")]
             ])
         )
     except Exception as e:
-        await callback.answer(f" Ошибка: {e}", show_alert=True)
+        await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
 
-# 🔹 Инлайн-режим (ИСПРАВЛЕННЫЙ - создаёт ссылки только по запросу)
+#  Инлайн-режим (ИСПРАВЛЕННЫЙ)
 @dp.inline_query()
 async def inline_handler(inline_query: InlineQuery):
     if not is_admin(inline_query.from_user.id):
@@ -149,16 +149,17 @@ async def inline_handler(inline_query: InlineQuery):
         )
     
     query = inline_query.query.lower().strip()
+    admin_tag = get_user_tag(inline_query.from_user)
     
-    # Если запрос пустой - показываем список каналов БЕЗ создания ссылок
+    # Если запрос пустой - показываем список каналов с инструкцией
     if not query:
         results = [
             InlineQueryResultArticle(
                 id=str(cid),
                 title=f"📢 {info['name']}",
-                description="Введите название канала для получения ссылки",
+                description="Нажмите для получения ссылки",
                 input_message_content=InputTextMessageContent(
-                    message_text=f"Выберите канал: {info['name']}"
+                    message_text=f"Для получения ссылки введите в чат:\n@ваш_бот {info['name']}"
                 ),
                 cache_time=0
             )
@@ -187,22 +188,28 @@ async def inline_handler(inline_query: InlineQuery):
         )
     
     # Создаём ссылки только для отфильтрованных каналов
-    admin_tag = get_user_tag(inline_query.from_user)
-    
     async def make_res(cid, info):
         try:
             link = await create_link(cid, info, admin_tag)
             return InlineQueryResultArticle(
                 id=str(cid),
                 title=f"🔗 {info['name']}",
-                description="Одноразовая ссылка",
+                description="Нажмите для отправки ссылки",
                 input_message_content=InputTextMessageContent(
-                    message_text=f"✅ {info['name']}:\n{link}"
+                    message_text=f"✅ Одноразовая ссылка для {info['name']}:\n{link}"
                 ),
                 cache_time=0
             )
-        except:
-            return None
+        except Exception as e:
+            return InlineQueryResultArticle(
+                id=f"error_{cid}",
+                title=f"❌ {info['name']}",
+                description=f"Ошибка: {e}",
+                input_message_content=InputTextMessageContent(
+                    message_text=f"Ошибка создания ссылки для {info['name']}: {e}"
+                ),
+                cache_time=0
+            )
     
     tasks = [make_res(cid, info) for cid, info in filtered_channels.items()]
     res = await asyncio.gather(*tasks)
@@ -247,9 +254,9 @@ async def cmd_logs(message: Message):
     )
 
 async def main():
-    logger.info(" Запуск фоновой задачи логирования...")
+    logger.info("🚀 Запуск фоновой задачи логирования...")
     asyncio.create_task(log_sender())
-    logger.info("🤖 Бот запущен. Введите /start или @ваш_бот в чате.")
+    logger.info(" Бот запущен. Введите /start или @ваш_бот в чате.")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
