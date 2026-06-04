@@ -76,7 +76,7 @@ async def create_link(chat_id: int, info: dict, admin_tag: str) -> str:
         add_log(f"❌ Ошибка создания ссылки ({chat_id}): {e}")
         raise
 
-#  /start
+# 🔹 /start
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     if not is_admin(message.from_user.id):
@@ -86,12 +86,12 @@ async def cmd_start(message: Message):
         [InlineKeyboardButton(text="🔗 Получить ссылку", callback_data="get_links")]
     ])
     await message.answer(
-        "👋 <b>Привет!</b> Нажмите кнопку для генерации ссылки.",
+        "👋 <b>Привет!</b> Нажмите кнопку для выбора канала.",
         reply_markup=kb,
         parse_mode="HTML"
     )
 
-# 🔹 Показать каналы
+# 🔹 Показать каналы (кнопки)
 @dp.callback_query(F.data == "get_links")
 async def cb_get_links(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -103,16 +103,16 @@ async def cb_get_links(callback: CallbackQuery):
     ])
     
     try:
-        await callback.message.edit_text(" Выберите канал:", reply_markup=kb)
+        await callback.message.edit_text("🔽 Выберите канал:", reply_markup=kb)
     except:
         pass
     await callback.answer()
 
-# 🔹 Выбор канала
+# 🔹 Выбор канала (создаёт ОДНУ ссылку)
 @dp.callback_query(F.data.startswith("channel_"))
 async def cb_channel_selected(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
-        return await callback.answer(" Доступ запрещен", show_alert=True)
+        return await callback.answer("⛔ Доступ запрещен", show_alert=True)
     
     try:
         chat_id = int(callback.data.replace("channel_", ""))
@@ -122,7 +122,7 @@ async def cb_channel_selected(callback: CallbackQuery):
             return await callback.answer("❌ Канал не найден", show_alert=True)
         
         admin_tag = get_user_tag(callback.from_user)
-        await callback.answer("⏳ Генерация...")
+        await callback.answer(" Генерация...")
         invite_link = await create_link(chat_id, channel_info, admin_tag)
         
         await callback.message.answer(
@@ -130,15 +130,15 @@ async def cb_channel_selected(callback: CallbackQuery):
             parse_mode="HTML"
         )
         await callback.message.edit_text(
-            f"🔗 Ссылка для <b>{channel_info['name']}</b> готова!",
+            f" Ссылка для <b>{channel_info['name']}</b> готова!",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔗 Ещё ссылку", callback_data="get_links")]
             ])
         )
     except Exception as e:
-        await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
+        await callback.answer(f" Ошибка: {e}", show_alert=True)
 
-# 🔹 Инлайн-режим (ИСПРАВЛЕННЫЙ)
+# 🔹 Инлайн-режим (ИСПРАВЛЕННЫЙ - создаёт ссылки только по запросу)
 @dp.inline_query()
 async def inline_handler(inline_query: InlineQuery):
     if not is_admin(inline_query.from_user.id):
@@ -150,7 +150,7 @@ async def inline_handler(inline_query: InlineQuery):
     
     query = inline_query.query.lower().strip()
     
-    # Если запрос пустой - показываем список каналов без создания ссылок
+    # Если запрос пустой - показываем список каналов БЕЗ создания ссылок
     if not query:
         results = [
             InlineQueryResultArticle(
@@ -247,7 +247,7 @@ async def cmd_logs(message: Message):
     )
 
 async def main():
-    logger.info("🚀 Запуск фоновой задачи логирования...")
+    logger.info(" Запуск фоновой задачи логирования...")
     asyncio.create_task(log_sender())
     logger.info("🤖 Бот запущен. Введите /start или @ваш_бот в чате.")
     await dp.start_polling(bot)
@@ -256,4 +256,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info(" Бот остановлен.")
+        logger.info("👋 Бот остановлен.")
