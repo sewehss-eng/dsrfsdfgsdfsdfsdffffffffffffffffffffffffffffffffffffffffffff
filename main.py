@@ -34,6 +34,7 @@ async def log_sender():
     if not OWNER_ID:
         logger.warning("⛔ OWNER_ID не указан. Логи не отправляются.")
         return
+    
     try:
         await bot.send_message(OWNER_ID, "🔔 <b>Система логов запущена.</b>", parse_mode="HTML")
         logger.info(f"✅ Связь с владельцем ({OWNER_ID}) установлена.")
@@ -41,14 +42,16 @@ async def log_sender():
         logger.critical(f"❌ НЕ УДАЕТСЯ ОТПРАВИТЬ ЛОГИ ВЛАДЕЛЬЦУ! Причина: {e}")
         logger.critical("💡 РЕШЕНИЕ: Найди бота, нажми /start и перезапусти скрипт.")
         return
-
+    
     while True:
         await asyncio.sleep(5)
         logs = []
         while not log_queue.empty():
-            try: logs.append(log_queue.get_nowait())
-            except asyncio.QueueEmpty: break
-            
+            try:
+                logs.append(log_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        
         if logs:
             msg = "📋 <b>Логи активности:</b>\n" + "\n".join(logs)
             try:
@@ -73,44 +76,55 @@ async def create_link(chat_id: int, info: dict, admin_tag: str) -> str:
         add_log(f"❌ Ошибка создания ссылки ({chat_id}): {e}")
         raise
 
-# 🔹 /start
+#  /start
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     if not is_admin(message.from_user.id):
         return await message.answer("⛔ Доступ только для администраторов")
+    
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔗 Получить ссылку", callback_data="get_links")]
     ])
-    await message.answer("👋 <b>Привет!</b> Нажмите кнопку для генерации ссылки.", reply_markup=kb, parse_mode="HTML")
+    await message.answer(
+        "👋 <b>Привет!</b> Нажмите кнопку для генерации ссылки.",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
 
 # 🔹 Показать каналы
 @dp.callback_query(F.data == "get_links")
 async def cb_get_links(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         return await callback.answer("⛔ Доступ запрещен", show_alert=True)
+    
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"📢 {info['name']}", callback_data=f"channel_{cid}")]
         for cid, info in CHANNELS.items()
     ])
-    try: await callback.message.edit_text("🔽 Выберите канал:", reply_markup=kb)
-    except: pass
+    
+    try:
+        await callback.message.edit_text(" Выберите канал:", reply_markup=kb)
+    except:
+        pass
     await callback.answer()
 
 # 🔹 Выбор канала
 @dp.callback_query(F.data.startswith("channel_"))
 async def cb_channel_selected(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
-        return await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return await callback.answer(" Доступ запрещен", show_alert=True)
+    
     try:
         chat_id = int(callback.data.replace("channel_", ""))
         channel_info = CHANNELS.get(chat_id)
+        
         if not channel_info:
             return await callback.answer("❌ Канал не найден", show_alert=True)
-
+        
         admin_tag = get_user_tag(callback.from_user)
         await callback.answer("⏳ Генерация...")
         invite_link = await create_link(chat_id, channel_info, admin_tag)
-
+        
         await callback.message.answer(
             f"✅ Одноразовая ссылка для <b>{channel_info['name']}</b>:\n{invite_link}",
             parse_mode="HTML"
@@ -124,25 +138,73 @@ async def cb_channel_selected(callback: CallbackQuery):
     except Exception as e:
         await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
 
-# 🔹 Инлайн-режим
+# 🔹 Инлайн-режим (ИСПРАВЛЕННЫЙ)
 @dp.inline_query()
 async def inline_handler(inline_query: InlineQuery):
     if not is_admin(inline_query.from_user.id):
-        return await inline_query.answer([], switch_pm_text="⛔ Только для админов", switch_pm_parameter="admin")
+        return await inline_query.answer(
+            [],
+            switch_pm_text="⛔ Только для админов",
+            switch_pm_parameter="admin"
+        )
     
+    query = inline_query.query.lower().strip()
+    
+    # Если запрос пустой - показываем список каналов без создания ссылок
+    if not query:
+        results = [
+            InlineQueryResultArticle(
+                id=str(cid),
+                title=f"📢 {info['name']}",
+                description="Введите название канала для получения ссылки",
+                input_message_content=InputTextMessageContent(
+                    message_text=f"Выберите канал: {info['name']}"
+                ),
+                cache_time=0
+            )
+            for cid, info in CHANNELS.items()
+        ]
+        return await inline_query.answer(results, cache_time=0)
+    
+    # Фильтруем каналы по запросу
+    filtered_channels = {
+        cid: info for cid, info in CHANNELS.items()
+        if query in info['name'].lower()
+    }
+    
+    # Если ничего не найдено
+    if not filtered_channels:
+        return await inline_query.answer(
+            [InlineQueryResultArticle(
+                id="not_found",
+                title="❌ Канал не найден",
+                description="Попробуйте другой запрос",
+                input_message_content=InputTextMessageContent(
+                    message_text="Канал не найден. Попробуйте другой запрос."
+                )
+            )],
+            cache_time=0
+        )
+    
+    # Создаём ссылки только для отфильтрованных каналов
     admin_tag = get_user_tag(inline_query.from_user)
     
     async def make_res(cid, info):
         try:
             link = await create_link(cid, info, admin_tag)
             return InlineQueryResultArticle(
-                id=str(cid), title=f"🔗 {info['name']}", description="Одноразовая ссылка",
-                input_message_content=InputTextMessageContent(message_text=f"✅ {info['name']}:\n{link}"),
+                id=str(cid),
+                title=f"🔗 {info['name']}",
+                description="Одноразовая ссылка",
+                input_message_content=InputTextMessageContent(
+                    message_text=f"✅ {info['name']}:\n{link}"
+                ),
                 cache_time=0
             )
-        except: return None
-
-    tasks = [make_res(cid, info) for cid, info in CHANNELS.items()]
+        except:
+            return None
+    
+    tasks = [make_res(cid, info) for cid, info in filtered_channels.items()]
     res = await asyncio.gather(*tasks)
     await inline_query.answer([r for r in res if r], cache_time=0)
 
@@ -151,7 +213,7 @@ async def inline_handler(inline_query: InlineQuery):
 async def on_chat_member_update(event: ChatMemberUpdated):
     if event.new_chat_member.status != "member" or not event.invite_link:
         return
-        
+    
     user = event.new_chat_member.user
     user_tag = get_user_tag(user)
     channel_name = CHANNELS.get(event.chat.id, {}).get("name", "Неизвестный канал")
@@ -161,19 +223,28 @@ async def on_chat_member_update(event: ChatMemberUpdated):
 # 🔹 Тест логов
 @dp.message(Command("test_log"))
 async def cmd_test_log(message: Message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID:
+        return
     add_log(f"🧪 Тест от <b>{get_user_tag(message.from_user)}</b>")
     await message.answer("✅ Тестовый лог добавлен. Придёт в течение 5 сек.")
 
 # 🔹 Ручной вызов логов
 @dp.message(Command("logs"))
 async def cmd_logs(message: Message):
-    if not is_admin(message.from_user.id): return
+    if not is_admin(message.from_user.id):
+        return
+    
     logs = []
     while not log_queue.empty():
-        try: logs.append(log_queue.get_nowait())
-        except: break
-    await message.answer("📭 Логи пусты." if not logs else "📋 <b>Текущие логи:</b>\n" + "\n".join(logs), parse_mode="HTML")
+        try:
+            logs.append(log_queue.get_nowait())
+        except:
+            break
+    
+    await message.answer(
+        "📭 Логи пусты." if not logs else "📋 <b>Текущие логи:</b>\n" + "\n".join(logs),
+        parse_mode="HTML"
+    )
 
 async def main():
     logger.info("🚀 Запуск фоновой задачи логирования...")
@@ -185,4 +256,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("👋 Бот остановлен.")
+        logger.info(" Бот остановлен.")
