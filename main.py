@@ -68,7 +68,7 @@ async def create_link(chat_id: int, info: dict, admin_tag: str) -> str:
         link = await bot.create_chat_invite_link(
             chat_id=chat_id,
             member_limit=1,
-            expire_date=datetime.now() + timedelta(minutes=5)
+            expire_date=datetime.now() + timedelta(minutes=60)
         )
         add_log(f"👤 Админ <b>{admin_tag}</b> создал ссылку для <b>{info['name']}</b>")
         return link.invite_link
